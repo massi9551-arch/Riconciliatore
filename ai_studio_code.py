@@ -88,7 +88,6 @@ def run_reconciliation(off_df, tar_df, start, end):
                 matched_off_idx.append(match_any.index[0]); matched_tar_idx.append(t_idx)
 
     discrepancies = []
-    # 1. Mancanti nel Gestionale (Presenti solo in Banca)
     for o_idx, o_row in off.iterrows():
         if o_idx not in matched_off_idx:
             discrepancies.append({
@@ -97,7 +96,6 @@ def run_reconciliation(off_df, tar_df, start, end):
                 'Descrizione': o_row['description'],
                 'Importo': -abs(o_row['amount'])
             })
-    # 2. Mancanti in Banca (Presenti solo nel Gestionale)
     for t_idx, t_row in tar.iterrows():
         if t_idx not in matched_tar_idx:
             discrepancies.append({
@@ -110,6 +108,7 @@ def run_reconciliation(off_df, tar_df, start, end):
     return pd.DataFrame(discrepancies)
 
 st.title("🔄 Riconciliatore Bancario")
+st.markdown("Confronto tra Estratto Conto e Gestionale")
 
 c1, c2 = st.columns(2)
 with c1: off_file = st.file_uploader("Estratto Conto (Ufficiale)", type=['xlsx'])
@@ -129,12 +128,20 @@ if st.button("🚀 Avvia Analisi", use_container_width=True):
             if not results.empty:
                 st.subheader(f"📊 Risultato: {len(results)} discrepanze trovate")
                 
-                # Applichiamo un po' di colore alla colonna Fonte per leggibilità
-                def color_fonte(val):
-                    color = '#e0f2fe' if 'Ufficiale' in val else '#fef3c7'
-                    return f'background-color: {color}'
+                # Ordinamento per data
+                results = results.sort_values(['Data', 'Fonte'])
                 
-                st.dataframe(results.sort_values(['Data', 'Fonte']).style.applymap(color_fonte, subset=['Fonte']), use_container_width=True)
+                # Visualizzazione con formattazione Euro e 2 decimali
+                st.dataframe(
+                    results,
+                    column_config={
+                        "Importo": st.column_config.NumberColumn(
+                            "Importo",
+                            format="€ %.2f",
+                        )
+                    },
+                    use_container_width=True
+                )
                 
                 output = io.BytesIO()
                 with pd.ExcelWriter(output, engine='openpyxl') as writer:
