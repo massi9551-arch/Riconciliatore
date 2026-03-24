@@ -116,7 +116,6 @@ def run_reconciliation(off_df, tar_df, start, end):
     return pd.DataFrame(discrepancies)
 
 st.title("🔄 Riconciliatore Bancario")
-st.markdown("Analisi specifica per il periodo Gennaio 2025 (Target: 29 discrepanze)")
 
 c1, c2 = st.columns(2)
 with c1: off_file = st.file_uploader("Estratto Conto (Ufficiale)", type=['xlsx'])
