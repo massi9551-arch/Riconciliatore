@@ -10,55 +10,41 @@ def parse_amount(val):
     if pd.isna(val) or val == '': return 0.0
     if isinstance(val, (int, float)): return float(val)
     s = str(val).strip()
-    # Se la stringa è troppo lunga, probabilmente è una descrizione, non un numero
     if len(s) > 15: return 0.0
-    
     s = re.sub(r'[^0-9,.-]', '', s)
     if not s: return 0.0
-    
     if ',' in s and '.' in s:
         if s.rfind('.') > s.rfind(','): s = s.replace(',', '')
         else: s = s.replace('.', '').replace(',', '.')
     elif ',' in s: s = s.replace(',', '.')
     try:
         res = float(s)
-        # Filtro per evitare di prendere numeri di carta o ID (es. numeri interi molto grandi)
         if res > 500000 and '.' not in s and ',' not in s: return 0.0
         return res
     except:
         return 0.0
 
 def get_row_amount(row, desc_col_name=None, date_col_name=None):
-    """Estrae l'importo evitando le colonne di testo e date."""
     dare_keys = ['dare', 'debit', 'uscita', 'pagamento', 'addebito']
     avere_keys = ['avere', 'credit', 'entrata', 'versamento', 'accredito']
-    
-    # 1. Priorità assoluta alle colonne che si chiamano esplicitamente Dare/Avere o Importo
     for col in row.index:
         l_col = str(col).lower()
         if l_col == desc_col_name or l_col == date_col_name: continue
-        
         if any(k in l_col for k in dare_keys):
             v = parse_amount(row[col])
             if v != 0: return round(v, 2)
         if any(k in l_col for k in avere_keys):
             v = parse_amount(row[col])
-            if v != 0: return round(-abs(v), 2) # Gli accrediti li gestiamo dopo nel match
-            
-    # 2. Cerca colonna Importo
+            if v != 0: return round(-abs(v), 2)
     for col in row.index:
         if col == desc_col_name or col == date_col_name: continue
         if any(k in str(col).lower() for k in ['importo', 'valore', 'netto', 'amount']):
             v = parse_amount(row[col])
             if v != 0: return round(v, 2)
-
-    # 3. Fallback: cerca in tutte le colonne TRANNE descrizione e data
     for col in row.index:
         if col == desc_col_name or col == date_col_name: continue
-        val = row[col]
-        p = parse_amount(val)
-        if 0.01 <= abs(p) < 500000: # Limite ragionevole per un singolo movimento
-            return round(p, 2)
+        p = parse_amount(row[col])
+        if 0.01 <= abs(p) < 500000: return round(p, 2)
     return 0.0
 
 def process_file(file):
@@ -70,19 +56,14 @@ def process_file(file):
                 df.columns = df.iloc[i]
                 df = df.iloc[i+1:].reset_index(drop=True)
                 break
-    
     date_col = next((c for c in df.columns if any(k in str(c).lower() for k in ['data', 'date'])), df.columns[0])
     desc_col = next((c for c in df.columns if any(k in str(c).lower() for k in ['descrizione', 'causale', 'note', 'operazione']) and c != date_col), None)
-
     rows = []
     for _, row in df.iterrows():
         try:
             d = pd.to_datetime(row[date_col], errors='coerce')
             if pd.isna(d): continue
-            
-            # Passiamo il nome della colonna descrizione per ignorarla nel calcolo dell'importo
             amt = get_row_amount(row, desc_col_name=str(desc_col).lower() if desc_col else None, date_col_name=str(date_col).lower())
-            
             if amt == 0: continue
             desc = str(row[desc_col]) if desc_col and not pd.isna(row[desc_col]) else ""
             rows.append({'date': d, 'amount': amt, 'description': desc})
@@ -92,33 +73,40 @@ def process_file(file):
 def run_reconciliation(off_df, tar_df, start, end):
     off = off_df[(off_df['date'] >= pd.Timestamp(start)) & (off_df['date'] <= pd.Timestamp(end))].copy()
     tar = tar_df[(tar_df['date'] >= pd.Timestamp(start)) & (tar_df['date'] <= pd.Timestamp(end))].copy()
-
-    matched_off_idx = []
-    matched_tar_idx = []
+    matched_off_idx, matched_tar_idx = [], []
 
     for t_idx, t_row in tar.iterrows():
         possible = off[~off.index.isin(matched_off_idx) & (off['date'] == t_row['date'])]
         match = possible[abs(abs(possible['amount']) - abs(t_row['amount'])) < 0.01]
-        
         if not match.empty:
-            matched_off_idx.append(match.index[0])
-            matched_tar_idx.append(t_idx)
+            matched_off_idx.append(match.index[0]); matched_tar_idx.append(t_idx)
         else:
             possible_any_date = off[~off.index.isin(matched_off_idx)]
             date_diff = (possible_any_date['date'] - t_row['date']).dt.days.abs()
             match_any = possible_any_date[(date_diff <= 4) & (abs(abs(possible_any_date['amount']) - abs(t_row['amount'])) < 0.01)]
             if not match_any.empty:
-                matched_off_idx.append(match_any.index[0])
-                matched_tar_idx.append(t_idx)
+                matched_off_idx.append(match_any.index[0]); matched_tar_idx.append(t_idx)
 
     discrepancies = []
+    # 1. Mancanti nel Gestionale (Presenti solo in Banca)
     for o_idx, o_row in off.iterrows():
         if o_idx not in matched_off_idx:
             discrepancies.append({
                 'Data': o_row['date'].strftime('%d/%m/%Y'),
+                'Fonte': 'Ufficiale (Banca)',
                 'Descrizione': o_row['description'],
-                'Importo non trovato': -abs(o_row['amount'])
+                'Importo': -abs(o_row['amount'])
             })
+    # 2. Mancanti in Banca (Presenti solo nel Gestionale)
+    for t_idx, t_row in tar.iterrows():
+        if t_idx not in matched_tar_idx:
+            discrepancies.append({
+                'Data': t_row['date'].strftime('%d/%m/%Y'),
+                'Fonte': 'Da Riconciliare (Gestionale)',
+                'Descrizione': t_row['description'],
+                'Importo': t_row['amount']
+            })
+            
     return pd.DataFrame(discrepancies)
 
 st.title("🔄 Riconciliatore Bancario")
@@ -140,12 +128,19 @@ if st.button("🚀 Avvia Analisi", use_container_width=True):
             
             if not results.empty:
                 st.subheader(f"📊 Risultato: {len(results)} discrepanze trovate")
-                st.dataframe(results.sort_values('Data'), use_container_width=True)
+                
+                # Applichiamo un po' di colore alla colonna Fonte per leggibilità
+                def color_fonte(val):
+                    color = '#e0f2fe' if 'Ufficiale' in val else '#fef3c7'
+                    return f'background-color: {color}'
+                
+                st.dataframe(results.sort_values(['Data', 'Fonte']).style.applymap(color_fonte, subset=['Fonte']), use_container_width=True)
+                
                 output = io.BytesIO()
                 with pd.ExcelWriter(output, engine='openpyxl') as writer:
                     results.to_excel(writer, index=False)
-                st.download_button("📥 Scarica Report Excel", output.getvalue(), "discrepanze_gennaio.xlsx")
+                st.download_button("📥 Scarica Report Excel", output.getvalue(), "discrepanze_riconciliazione.xlsx")
             else:
-                st.success("✅ Tutto coincide perfettamente!")
+                st.success("✅ Riconciliazione perfetta! Tutti i movimenti coincidono.")
     else:
-        st.error("Carica entrambi i file.")
+        st.error("Carica entrambi i file per procedere.")
