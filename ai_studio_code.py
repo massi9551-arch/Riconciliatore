@@ -127,21 +127,19 @@ if st.button("🚀 Avvia Analisi", use_container_width=True):
             
             if not results.empty:
                 st.subheader(f"📊 Risultato: {len(results)} discrepanze trovate")
-                
-                # Ordinamento per data
                 results = results.sort_values(['Data', 'Fonte'])
-                
-                # Visualizzazione con formattazione Euro e 2 decimali
-                st.dataframe(
-                    results,
-                    column_config={
-                        "Importo": st.column_config.NumberColumn(
-                            "Importo",
-                            format="€ %.2f",
-                        )
-                    },
-                    use_container_width=True
-                )
+
+                # Funzione per applicare gli stili (Colori e Badge)
+                def style_results(styler):
+                    # Colore Importo: Rosso se negativo, Verde se positivo
+                    styler.applymap(lambda x: f"color: {'#ef4444' if x < 0 else '#22c55e'}; font-weight: bold", subset=['Importo'])
+                    # Badge Fonte: Blu per Ufficiale, Arancio per Gestionale
+                    styler.applymap(lambda x: f"background-color: {'#2563eb' if 'Ufficiale' in x else '#f97316'}; color: white; font-weight: bold; border-radius: 4px; padding: 2px 5px", subset=['Fonte'])
+                    # Formattazione Euro
+                    styler.format({'Importo': '€ {:.2f}'})
+                    return styler
+
+                st.dataframe(style_results(results.style), use_container_width=True)
                 
                 output = io.BytesIO()
                 with pd.ExcelWriter(output, engine='openpyxl') as writer:
