@@ -24,11 +24,7 @@ def parse_amount(val):
     except: return 0.0
 
 def get_row_amount(row, desc_col=None, date_col=None):
-    """
-    Estrae l'importo netto basandosi sui nomi delle colonne.
-    Se il valore è in una colonna 'Dare', 'Uscita' o 'Pagamento', 
-    viene automaticamente trattato come negativo.
-    """
+    """Estrae l'importo netto basandosi sui nomi delle colonne."""
     dare_keys = ['dare', 'debit', 'uscita', 'pagamento', 'addebito']
     avere_keys = ['avere', 'credit', 'entrata', 'versamento', 'accredito']
     
@@ -39,13 +35,11 @@ def get_row_amount(row, desc_col=None, date_col=None):
         l_col = str(col).lower()
         if l_col == str(desc_col).lower() or l_col == str(date_col).lower(): continue
         
-        # Se la colonna suggerisce un'uscita, forziamo il valore come negativo per il calcolo
         if any(k in l_col for k in dare_keys):
             v = parse_amount(row[col])
             if v != 0:
                 dare_val += abs(v)
                 found_split = True
-        # Se la colonna suggerisce un'entrata, lo trattiamo come positivo
         elif any(k in l_col for k in avere_keys):
             v = parse_amount(row[col])
             if v != 0:
@@ -53,17 +47,14 @@ def get_row_amount(row, desc_col=None, date_col=None):
                 found_split = True
             
     if found_split:
-        # Il netto è: Entrate (Avere) - Uscite (Dare)
         return round(avere_val - dare_val, 2)
 
-    # 2. Se non ci sono colonne specifiche, cerco una colonna generica "Importo"
     for col in row.index:
         if col == desc_col or col == date_col: continue
         if any(k in str(col).lower() for k in ['importo', 'valore', 'netto', 'amount']):
             v = parse_amount(row[col])
             if v != 0: return round(v, 2)
             
-    # 3. Fallback: prendo il primo valore numerico sensato
     for col in row.index:
         if col == desc_col or col == date_col: continue
         p = parse_amount(row[col])
@@ -101,14 +92,12 @@ def run_reconciliation(off_df, tar_df, start, end):
     matched_off, matched_tar = [], []
     near_matches, date_mismatches = [], []
 
-    # 1. Match Esatti
     for t_idx, t_row in tar.iterrows():
         possible = off[~off.index.isin(matched_off) & (off['date'] == t_row['date'])]
         match = possible[abs(abs(possible['amount']) - abs(t_row['amount'])) < 0.001]
         if not match.empty:
             matched_off.append(match.index[0]); matched_tar.append(t_idx)
 
-    # 2. Differenze Minime (Spostate in tabella dedicata)
     for t_idx, t_row in tar.iterrows():
         if t_idx in matched_tar: continue
         possible = off[~off.index.isin(matched_off) & (off['date'] == t_row['date'])]
@@ -124,7 +113,6 @@ def run_reconciliation(off_df, tar_df, start, end):
             })
             matched_off.append(best_idx); matched_tar.append(t_idx)
 
-    # 3. Date Diverse (Suggerimenti)
     for t_idx, t_row in tar.iterrows():
         if t_idx in matched_tar: continue
         possible = off[~off.index.isin(matched_off)]
@@ -140,7 +128,6 @@ def run_reconciliation(off_df, tar_df, start, end):
                     matched_off.append(o_idx); matched_tar.append(t_idx)
                     break
 
-    # 4. Discrepanze Finali
     discrepancies = []
     for o_idx, o_row in off.iterrows():
         if o_idx not in matched_off:
@@ -162,6 +149,7 @@ def run_reconciliation(off_df, tar_df, start, end):
     return pd.DataFrame(discrepancies), near_matches, date_mismatches
 
 st.title("🔄 Riconciliatore Bancario")
+st.markdown("Analisi avanzata con gestione automatica dei segni")
 
 c1, c2 = st.columns(2)
 with c1: off_file = st.file_uploader("Estratto Conto (Ufficiale)", type=['xlsx'])
@@ -180,20 +168,32 @@ if st.button("🚀 Avvia Analisi", use_container_width=True):
             
             if near:
                 st.warning("⚠️ Differenze minime rilevate (stessa data, importo quasi uguale)")
-                st.dataframe(pd.DataFrame(near), use_container_width=True, hide_index=True)
+                df_near = pd.DataFrame(near)
+                st.dataframe(
+                    df_near.style.format({
+                        'Ufficiale': '€ {:.2f}',
+                        'Gestionale': '€ {:.2f}',
+                        'Differenza': '€ {:.2f}'
+                    }),
+                    use_container_width=True,
+                    hide_index=True
+                )
             
             if date_mismatches:
                 st.info("ℹ️ Suggerimento: Stesso importo trovato su date diverse")
-                st.dataframe(pd.DataFrame(date_mismatches), use_container_width=True, hide_index=True)
+                df_mismatches = pd.DataFrame(date_mismatches)
+                st.dataframe(
+                    df_mismatches.style.format({'Importo': '€ {:.2f}'}).applymap(lambda x: 'font-weight: bold', subset=['Importo']),
+                    use_container_width=True,
+                    hide_index=True
+                )
 
             if not results.empty:
                 st.subheader(f"📊 Discrepanze Trovate ({len(results)} righe)")
                 results = results.sort_values(['Data', 'Fonte'])
 
                 def style_results(styler):
-                    # Rosso se negativo, Verde se positivo o zero
                     styler.applymap(lambda x: f"color: {'#ef4444' if x < 0 else '#22c55e'}; font-weight: bold", subset=['Importo'])
-                    # Badge Fonte: Blu per Ufficiale, Arancio per Gestionale
                     styler.applymap(lambda x: f"background-color: {'#2563eb' if 'Ufficiale' in x else '#f97316'}; color: white; font-weight: bold; border-radius: 4px; padding: 2px 6px; display: inline-block", subset=['Fonte'])
                     styler.format({'Importo': '€ {:.2f}'})
                     return styler
