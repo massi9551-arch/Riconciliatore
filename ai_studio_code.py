@@ -24,25 +24,35 @@ def parse_amount(val):
     except: return 0.0
 
 def get_row_amount(row, desc_col=None, date_col=None):
+    """Estrae l'importo netto rispettando i segni Dare/Avere."""
     dare_keys = ['dare', 'debit', 'uscita', 'pagamento', 'addebito']
     avere_keys = ['avere', 'credit', 'entrata', 'versamento', 'accredito']
-    # 1. Dare/Avere
+    
+    dare_val, avere_val = 0.0, 0.0
+    found_split = False
+    
     for col in row.index:
         l_col = str(col).lower()
         if l_col == str(desc_col).lower() or l_col == str(date_col).lower(): continue
         if any(k in l_col for k in dare_keys):
-            v = parse_amount(row[col])
-            if v != 0: return round(v, 2)
+            dare_val = abs(parse_amount(row[col]))
+            found_split = True
         if any(k in l_col for k in avere_keys):
-            v = parse_amount(row[col])
-            if v != 0: return round(-abs(v), 2)
-    # 2. Importo
+            avere_val = abs(parse_amount(row[col]))
+            found_split = True
+            
+    if found_split:
+        # Avere (Entrata) è +, Dare (Uscita) è -
+        return round(avere_val - dare_val, 2)
+
+    # 2. Cerca colonna Importo unico
     for col in row.index:
         if col == desc_col or col == date_col: continue
         if any(k in str(col).lower() for k in ['importo', 'valore', 'netto', 'amount']):
             v = parse_amount(row[col])
             if v != 0: return round(v, 2)
-    # 3. Fallback
+            
+    # 3. Fallback numerico
     for col in row.index:
         if col == desc_col or col == date_col: continue
         p = parse_amount(row[col])
@@ -79,14 +89,14 @@ def run_reconciliation(off_df, tar_df, start, end):
     matched_off, matched_tar = [], []
     near_matches, date_mismatches = [], []
 
-    # 1. Match Esatti (Data + Importo Assoluto)
+    # 1. Match Esatti
     for t_idx, t_row in tar.iterrows():
         possible = off[~off.index.isin(matched_off) & (off['date'] == t_row['date'])]
         match = possible[abs(abs(possible['amount']) - abs(t_row['amount'])) < 0.001]
         if not match.empty:
             matched_off.append(match.index[0]); matched_tar.append(t_idx)
 
-    # 2. Differenze Minime (Stessa data, diff < 1€)
+    # 2. Differenze Minime
     for t_idx, t_row in tar.iterrows():
         if t_idx in matched_tar: continue
         possible = off[~off.index.isin(matched_off) & (off['date'] == t_row['date'])]
@@ -102,7 +112,7 @@ def run_reconciliation(off_df, tar_df, start, end):
             })
             matched_off.append(best_idx); matched_tar.append(t_idx)
 
-    # 3. Date Diverse (Stesso importo, data entro 5gg)
+    # 3. Date Diverse
     for t_idx, t_row in tar.iterrows():
         if t_idx in matched_tar: continue
         possible = off[~off.index.isin(matched_off)]
@@ -118,7 +128,7 @@ def run_reconciliation(off_df, tar_df, start, end):
                     matched_off.append(o_idx); matched_tar.append(t_idx)
                     break
 
-    # 4. Discrepanze Finali
+    # 4. Discrepanze Finali (NON FORZIAMO IL SEGNO)
     discrepancies = []
     for o_idx, o_row in off.iterrows():
         if o_idx not in matched_off:
@@ -126,7 +136,7 @@ def run_reconciliation(off_df, tar_df, start, end):
                 'Data': o_row['date'].strftime('%d/%m/%Y'),
                 'Fonte': 'Ufficiale (Banca)',
                 'Descrizione': o_row['description'],
-                'Importo': -abs(o_row['amount'])
+                'Importo': o_row['amount'] # Segno originale
             })
     for t_idx, t_row in tar.iterrows():
         if t_idx not in matched_tar:
@@ -134,7 +144,7 @@ def run_reconciliation(off_df, tar_df, start, end):
                 'Data': t_row['date'].strftime('%d/%m/%Y'),
                 'Fonte': 'Da Riconciliare (Gestionale)',
                 'Descrizione': t_row['description'],
-                'Importo': t_row['amount']
+                'Importo': t_row['amount'] # Segno originale
             })
             
     return pd.DataFrame(discrepancies), near_matches, date_mismatches
@@ -169,9 +179,8 @@ if st.button("🚀 Avvia Analisi", use_container_width=True):
                 results = results.sort_values(['Data', 'Fonte'])
 
                 def style_results(styler):
-                    # Colore Importo: Rosso se < 0, Verde se >= 0
+                    # Rosso se negativo, Verde se positivo o zero
                     styler.applymap(lambda x: f"color: {'#ef4444' if x < 0 else '#22c55e'}; font-weight: bold", subset=['Importo'])
-                    # Badge Fonte: Blu per Ufficiale, Arancio per Gestionale
                     styler.applymap(lambda x: f"background-color: {'#2563eb' if 'Ufficiale' in x else '#f97316'}; color: white; font-weight: bold; border-radius: 4px; padding: 2px 6px; display: inline-block", subset=['Fonte'])
                     styler.format({'Importo': '€ {:.2f}'})
                     return styler
