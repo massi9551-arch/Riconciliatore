@@ -24,40 +24,51 @@ def parse_amount(val):
     except: return 0.0
 
 def get_row_amount(row, desc_col=None, date_col=None):
-    """Estrae l'importo netto rispettando i segni Dare/Avere."""
+    """Logica avanzata: incrocia Colonne + Parole Chiave nella Descrizione."""
+    desc_text = str(row[desc_col]).lower() if desc_col and not pd.isna(row[desc_col]) else ""
+    
+    # Parole chiave per determinare il segno
+    uscita_keywords = ['pagamento', 'addebito', 'bonifico da voi', 'commissioni', 'prelievo', 'acquisto', 'costo', 'f24', 'ritenuta']
+    entrata_keywords = ['versamento', 'accredito', 'bonifico a vostro', 'storno', 'rimborso', 'entrata', 'ripresa saldo']
+
     dare_keys = ['dare', 'debit', 'uscita', 'pagamento', 'addebito']
     avere_keys = ['avere', 'credit', 'entrata', 'versamento', 'accredito']
     
-    dare_val, avere_val = 0.0, 0.0
-    found_split = False
-    
+    val_raw = 0.0
+    found_in_col = False
+
+    # 1. Controllo Colonne Dare/Avere
     for col in row.index:
         l_col = str(col).lower()
         if l_col == str(desc_col).lower() or l_col == str(date_col).lower(): continue
+        
         if any(k in l_col for k in dare_keys):
-            dare_val = abs(parse_amount(row[col]))
-            found_split = True
+            val_raw = -abs(parse_amount(row[col]))
+            found_in_col = True
+            break
         if any(k in l_col for k in avere_keys):
-            avere_val = abs(parse_amount(row[col]))
-            found_split = True
-            
-    if found_split:
-        # Avere (Entrata) è +, Dare (Uscita) è -
-        return round(avere_val - dare_val, 2)
+            val_raw = abs(parse_amount(row[col]))
+            found_in_col = True
+            break
 
-    # 2. Cerca colonna Importo unico
-    for col in row.index:
-        if col == desc_col or col == date_col: continue
-        if any(k in str(col).lower() for k in ['importo', 'valore', 'netto', 'amount']):
-            v = parse_amount(row[col])
-            if v != 0: return round(v, 2)
-            
-    # 3. Fallback numerico
-    for col in row.index:
-        if col == desc_col or col == date_col: continue
-        p = parse_amount(row[col])
-        if 0.01 <= abs(p) < 1000000: return round(p, 2)
-    return 0.0
+    # 2. Se non trovato nelle colonne specifiche, cerchiamo in 'Importo' o fallback
+    if not found_in_col:
+        for col in row.index:
+            if col == desc_col or col == date_col: continue
+            p = parse_amount(row[col])
+            if 0.01 <= abs(p) < 1000000:
+                val_raw = p
+                break
+
+    # 3. RAFFORZAMENTO CON DESCRIZIONE (La tua richiesta)
+    # Se la descrizione contiene parole di uscita, forziamo il segno meno
+    if any(k in desc_text for k in uscita_keywords):
+        return -abs(val_raw)
+    # Se la descrizione contiene parole di entrata, forziamo il segno più
+    if any(k in desc_text for k in entrata_keywords):
+        return abs(val_raw)
+
+    return round(val_raw, 2)
 
 def process_file(file):
     df = pd.read_excel(file)
@@ -89,14 +100,12 @@ def run_reconciliation(off_df, tar_df, start, end):
     matched_off, matched_tar = [], []
     near_matches, date_mismatches = [], []
 
-    # 1. Match Esatti
     for t_idx, t_row in tar.iterrows():
         possible = off[~off.index.isin(matched_off) & (off['date'] == t_row['date'])]
         match = possible[abs(abs(possible['amount']) - abs(t_row['amount'])) < 0.001]
         if not match.empty:
             matched_off.append(match.index[0]); matched_tar.append(t_idx)
 
-    # 2. Differenze Minime
     for t_idx, t_row in tar.iterrows():
         if t_idx in matched_tar: continue
         possible = off[~off.index.isin(matched_off) & (off['date'] == t_row['date'])]
@@ -112,7 +121,6 @@ def run_reconciliation(off_df, tar_df, start, end):
             })
             matched_off.append(best_idx); matched_tar.append(t_idx)
 
-    # 3. Date Diverse
     for t_idx, t_row in tar.iterrows():
         if t_idx in matched_tar: continue
         possible = off[~off.index.isin(matched_off)]
@@ -128,7 +136,6 @@ def run_reconciliation(off_df, tar_df, start, end):
                     matched_off.append(o_idx); matched_tar.append(t_idx)
                     break
 
-    # 4. Discrepanze Finali (NON FORZIAMO IL SEGNO)
     discrepancies = []
     for o_idx, o_row in off.iterrows():
         if o_idx not in matched_off:
@@ -136,7 +143,7 @@ def run_reconciliation(off_df, tar_df, start, end):
                 'Data': o_row['date'].strftime('%d/%m/%Y'),
                 'Fonte': 'Ufficiale (Banca)',
                 'Descrizione': o_row['description'],
-                'Importo': o_row['amount'] # Segno originale
+                'Importo': o_row['amount']
             })
     for t_idx, t_row in tar.iterrows():
         if t_idx not in matched_tar:
@@ -144,7 +151,7 @@ def run_reconciliation(off_df, tar_df, start, end):
                 'Data': t_row['date'].strftime('%d/%m/%Y'),
                 'Fonte': 'Da Riconciliare (Gestionale)',
                 'Descrizione': t_row['description'],
-                'Importo': t_row['amount'] # Segno originale
+                'Importo': t_row['amount']
             })
             
     return pd.DataFrame(discrepancies), near_matches, date_mismatches
@@ -163,15 +170,15 @@ if st.button("🚀 Avvia Analisi", use_container_width=True):
     if off_file and tar_file:
         with st.spinner('Analisi in corso...'):
             off_df = process_file(off_file)
-            tar_df = process_file(tar_file)
+            tar_df = process_file(tar_df_file if 'tar_df_file' in locals() else tar_file)
             results, near, date_mismatches = run_reconciliation(off_df, tar_df, start, end)
             
             if near:
-                st.warning("⚠️ Differenze minime rilevate (stessa data, importo quasi uguale)")
+                st.warning("⚠️ Differenze minime rilevate")
                 st.dataframe(pd.DataFrame(near), use_container_width=True, hide_index=True)
             
             if date_mismatches:
-                st.info("ℹ️ Suggerimento: Stesso importo trovato su date diverse")
+                st.info("ℹ️ Suggerimento: Stesso importo su date diverse")
                 st.dataframe(pd.DataFrame(date_mismatches), use_container_width=True, hide_index=True)
 
             if not results.empty:
@@ -179,7 +186,6 @@ if st.button("🚀 Avvia Analisi", use_container_width=True):
                 results = results.sort_values(['Data', 'Fonte'])
 
                 def style_results(styler):
-                    # Rosso se negativo, Verde se positivo o zero
                     styler.applymap(lambda x: f"color: {'#ef4444' if x < 0 else '#22c55e'}; font-weight: bold", subset=['Importo'])
                     styler.applymap(lambda x: f"background-color: {'#2563eb' if 'Ufficiale' in x else '#f97316'}; color: white; font-weight: bold; border-radius: 4px; padding: 2px 6px; display: inline-block", subset=['Fonte'])
                     styler.format({'Importo': '€ {:.2f}'})
@@ -192,6 +198,6 @@ if st.button("🚀 Avvia Analisi", use_container_width=True):
                     results.to_excel(writer, index=False)
                 st.download_button("📥 Scarica Report Excel", output.getvalue(), "discrepanze_riconciliazione.xlsx")
             else:
-                st.success("✅ Riconciliazione perfetta! Tutti i movimenti coincidono.")
+                st.success("✅ Riconciliazione perfetta!")
     else:
-        st.error("Carica entrambi i file per procedere.")
+        st.error("Carica entrambi i file.")
