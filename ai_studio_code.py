@@ -24,17 +24,13 @@ def parse_amount(val):
     except: return 0.0
 
 def get_row_amount(row, desc_col=None, date_col=None):
-    """Estrae l'importo netto basandosi sui nomi delle colonne."""
     dare_keys = ['dare', 'debit', 'uscita', 'pagamento', 'addebito']
     avere_keys = ['avere', 'credit', 'entrata', 'versamento', 'accredito']
-    
     dare_val, avere_val = 0.0, 0.0
     found_split = False
-    
     for col in row.index:
         l_col = str(col).lower()
         if l_col == str(desc_col).lower() or l_col == str(date_col).lower(): continue
-        
         if any(k in l_col for k in dare_keys):
             v = parse_amount(row[col])
             if v != 0:
@@ -45,21 +41,17 @@ def get_row_amount(row, desc_col=None, date_col=None):
             if v != 0:
                 avere_val += abs(v)
                 found_split = True
-            
     if found_split:
         return round(avere_val - dare_val, 2)
-
     for col in row.index:
         if col == desc_col or col == date_col: continue
         if any(k in str(col).lower() for k in ['importo', 'valore', 'netto', 'amount']):
             v = parse_amount(row[col])
             if v != 0: return round(v, 2)
-            
     for col in row.index:
         if col == desc_col or col == date_col: continue
         p = parse_amount(row[col])
         if 0.01 <= abs(p) < 1000000: return round(p, 2)
-        
     return 0.0
 
 def process_file(file):
@@ -88,16 +80,13 @@ def process_file(file):
 def run_reconciliation(off_df, tar_df, start, end):
     off = off_df[(off_df['date'] >= pd.Timestamp(start)) & (off_df['date'] <= pd.Timestamp(end))].copy()
     tar = tar_df[(tar_df['date'] >= pd.Timestamp(start)) & (tar_df['date'] <= pd.Timestamp(end))].copy()
-    
     matched_off, matched_tar = [], []
     near_matches, date_mismatches = [], []
-
     for t_idx, t_row in tar.iterrows():
         possible = off[~off.index.isin(matched_off) & (off['date'] == t_row['date'])]
         match = possible[abs(abs(possible['amount']) - abs(t_row['amount'])) < 0.001]
         if not match.empty:
             matched_off.append(match.index[0]); matched_tar.append(t_idx)
-
     for t_idx, t_row in tar.iterrows():
         if t_idx in matched_tar: continue
         possible = off[~off.index.isin(matched_off) & (off['date'] == t_row['date'])]
@@ -105,14 +94,8 @@ def run_reconciliation(off_df, tar_df, start, end):
         near = diffs[diffs <= 1.0]
         if not near.empty:
             best_idx = near.idxmin()
-            near_matches.append({
-                'Data': t_row['date'].strftime('%d/%m/%Y'),
-                'Ufficiale': off.loc[best_idx, 'amount'],
-                'Gestionale': t_row['amount'],
-                'Differenza': round(abs(off.loc[best_idx, 'amount']) - abs(t_row['amount']), 2)
-            })
+            near_matches.append({'Data': t_row['date'].strftime('%d/%m/%Y'), 'Ufficiale': off.loc[best_idx, 'amount'], 'Gestionale': t_row['amount'], 'Differenza': round(abs(off.loc[best_idx, 'amount']) - abs(t_row['amount']), 2)})
             matched_off.append(best_idx); matched_tar.append(t_idx)
-
     for t_idx, t_row in tar.iterrows():
         if t_idx in matched_tar: continue
         possible = off[~off.index.isin(matched_off)]
@@ -120,41 +103,22 @@ def run_reconciliation(off_df, tar_df, start, end):
         if not match.empty:
             for o_idx in match.index:
                 if abs((off.loc[o_idx, 'date'] - t_row['date']).days) <= 5:
-                    date_mismatches.append({
-                        'Importo': t_row['amount'],
-                        'Data Ufficiale': off.loc[o_idx, 'date'].strftime('%d/%m/%Y'),
-                        'Data Gestionale': t_row['date'].strftime('%d/%m/%Y')
-                    })
+                    date_mismatches.append({'Importo': t_row['amount'], 'Data Ufficiale': off.loc[o_idx, 'date'].strftime('%d/%m/%Y'), 'Data Gestionale': t_row['date'].strftime('%d/%m/%Y')})
                     matched_off.append(o_idx); matched_tar.append(t_idx)
                     break
-
     discrepancies = []
     for o_idx, o_row in off.iterrows():
         if o_idx not in matched_off:
-            discrepancies.append({
-                'Data': o_row['date'].strftime('%d/%m/%Y'),
-                'Fonte': 'Ufficiale (Banca)',
-                'Descrizione': o_row['description'],
-                'Importo': o_row['amount']
-            })
+            discrepancies.append({'Data': o_row['date'].strftime('%d/%m/%Y'), 'Fonte': 'Ufficiale (Banca)', 'Descrizione': o_row['description'], 'Importo': o_row['amount']})
     for t_idx, t_row in tar.iterrows():
         if t_idx not in matched_tar:
-            discrepancies.append({
-                'Data': t_row['date'].strftime('%d/%m/%Y'),
-                'Fonte': 'Da Riconciliare (Gestionale)',
-                'Descrizione': t_row['description'],
-                'Importo': t_row['amount']
-            })
-            
+            discrepancies.append({'Data': t_row['date'].strftime('%d/%m/%Y'), 'Fonte': 'Da Riconciliare (Gestionale)', 'Descrizione': t_row['description'], 'Importo': t_row['amount']})
     return pd.DataFrame(discrepancies), near_matches, date_mismatches
 
 st.title("🔄 Riconciliatore Bancario")
-st.markdown("Analisi avanzata con gestione automatica dei segni")
-
 c1, c2 = st.columns(2)
 with c1: off_file = st.file_uploader("Estratto Conto (Ufficiale)", type=['xlsx'])
 with c2: tar_file = st.file_uploader("Gestionale (Da Riconciliare)", type=['xlsx'])
-
 d1, d2 = st.columns(2)
 with d1: start = st.date_input("Inizio", datetime(2025, 1, 1))
 with d2: end = st.date_input("Fine", datetime(2025, 1, 31))
@@ -162,66 +126,44 @@ with d2: end = st.date_input("Fine", datetime(2025, 1, 31))
 if st.button("🚀 Avvia Analisi", use_container_width=True):
     if off_file and tar_file:
         with st.spinner('Analisi in corso...'):
-            off_df = process_file(off_file)
-            tar_df = process_file(tar_file)
-            results, near, date_mismatches = run_reconciliation(off_df, tar_df, start, end)
+            off_df_raw = process_file(off_file)
+            tar_df_raw = process_file(tar_file)
+            results, near, date_mismatches = run_reconciliation(off_df_raw, tar_df_raw, start, end)
             
             if near:
-                st.warning("⚠️ Differenze minime rilevate (stessa data, importo quasi uguale)")
-                df_near = pd.DataFrame(near)
-                st.dataframe(
-                    df_near.style.format({
-                        'Ufficiale': '€ {:.2f}',
-                        'Gestionale': '€ {:.2f}',
-                        'Differenza': '€ {:.2f}'
-                    }),
-                    use_container_width=True,
-                    hide_index=True
-                )
+                st.warning("⚠️ Differenze minime rilevate")
+                st.dataframe(pd.DataFrame(near).style.format({'Ufficiale': '€ {:.2f}', 'Gestionale': '€ {:.2f}', 'Differenza': '€ {:.2f}'}), use_container_width=True, hide_index=True)
             
             if date_mismatches:
-                st.info("ℹ️ Suggerimento: Stesso importo trovato su date diverse")
-                df_mismatches = pd.DataFrame(date_mismatches)
-                st.dataframe(
-                    df_mismatches.style.format({'Importo': '€ {:.2f}'}).applymap(lambda x: 'font-weight: bold', subset=['Importo']),
-                    use_container_width=True,
-                    hide_index=True
-                )
-
+                st.info("ℹ️ Suggerimento: Stesso importo su date diverse")
+                st.dataframe(pd.DataFrame(date_mismatches).style.format({'Importo': '€ {:.2f}'}).applymap(lambda x: 'font-weight: bold', subset=['Importo']), use_container_width=True, hide_index=True)
+            
             if not results.empty:
                 st.subheader(f"📊 Discrepanze Trovate ({len(results)} righe)")
-                results = results.sort_values(['Data', 'Fonte'])
-
                 def style_results(styler):
                     styler.applymap(lambda x: f"color: {'#ef4444' if x < 0 else '#22c55e'}; font-weight: bold", subset=['Importo'])
-                    styler.applymap(lambda x: f"background-color: {'#2563eb' if 'Ufficiale' in x else '#f97316'}; color: white; font-weight: bold; border-radius: 4px; padding: 2px 6px; display: inline-block", subset=['Fonte'])
+                    styler.applymap(lambda x: f"background-color: {'#2563eb' if 'Ufficiale' in x else '#f97316'}; color: white; font-weight: bold; border-radius: 4px; padding: 2px 6px", subset=['Fonte'])
                     styler.format({'Importo': '€ {:.2f}'})
                     return styler
-
-                st.dataframe(style_results(results.style), use_container_width=True, hide_index=True)
-                
-                output = io.BytesIO()
-                with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                    results.to_excel(writer, index=False)
-                st.download_button("📥 Scarica Report Excel", output.getvalue(), "discrepanze_riconciliazione.xlsx")
+                st.dataframe(style_results(results.sort_values(['Data', 'Fonte']).style), use_container_width=True, hide_index=True)
             else:
-                st.success("✅ Riconciliazione perfetta! Tutti i movimenti coincidono.")
-    else:
-        st.error("Carica entrambi i file per procedere.")
+                st.success("✅ Riconciliazione perfetta!")
 
- # --- SEZIONE TESORERIA ---
-        st.divider()
-        st.header("💰 Sezione Tesoreria (Dati Ufficiali)")
+            # --- SEZIONE TESORERIA ---
+            st.divider()
+            st.header("💰 Sezione Tesoreria (Dati Ufficiali)")
             off_period = off_df_raw[(off_df_raw['date'] >= pd.Timestamp(start)) & (off_df_raw['date'] <= pd.Timestamp(end))].copy()
             
             if not off_period.empty:
                 entrate_tot = off_period[off_period['amount'] > 0]['amount'].sum()
                 uscite_tot = abs(off_period[off_period['amount'] < 0]['amount'].sum())
                 saldo_netto = entrate_tot - uscite_tot
+                
                 m1, m2, m3 = st.columns(3)
                 m1.metric("Entrate Totali", f"€ {entrate_tot:,.2f}")
                 m2.metric("Uscite Totali", f"€ {uscite_tot:,.2f}")
                 m3.metric("Saldo Netto", f"€ {saldo_netto:,.2f}", delta=round(saldo_netto, 2))
+                
                 st.subheader("📈 Andamento Entrate vs Uscite")
                 off_period['Giorno'] = off_period['date'].dt.date
                 chart_data = off_period.groupby('Giorno').agg(
