@@ -210,8 +210,8 @@ if st.button("🚀 Avvia Analisi", use_container_width=True):
         st.error("Carica entrambi i file per procedere.")
 
  # --- SEZIONE TESORERIA ---
-            st.divider()
-            st.header("💰 Sezione Tesoreria (Dati Ufficiali)")
+        st.divider()
+        st.header("💰 Sezione Tesoreria (Dati Ufficiali)")
             off_period = off_df_raw[(off_df_raw['date'] >= pd.Timestamp(start)) & (off_df_raw['date'] <= pd.Timestamp(end))].copy()
             
             if not off_period.empty:
