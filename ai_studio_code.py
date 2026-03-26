@@ -159,61 +159,119 @@ d1, d2 = st.columns(2)
 with d1: start = st.date_input("Inizio", datetime(2025, 1, 1))
 with d2: end = st.date_input("Fine", datetime(2025, 1, 31))
 
+# Inizializzazione stato sessione
+if 'off_df' not in st.session_state:
+    st.session_state.off_df = pd.DataFrame()
+
+if 'tar_df' not in st.session_state:
+    st.session_state.tar_df = pd.DataFrame()
+
+if 'results' not in st.session_state:
+    st.session_state.results = pd.DataFrame()
+
+if 'near' not in st.session_state:
+    st.session_state.near = []
+
+if 'date_mismatches' not in st.session_state:
+    st.session_state.date_mismatches = []
+
 if st.button("🚀 Avvia Analisi", use_container_width=True):
     if off_file and tar_file:
         with st.spinner('Analisi in corso...'):
             off_df = process_file(off_file)
             tar_df = process_file(tar_file)
             results, near, date_mismatches = run_reconciliation(off_df, tar_df, start, end)
-            
-            if near:
-                st.warning("⚠️ Differenze minime rilevate (stessa data, importo quasi uguale)")
-                df_near = pd.DataFrame(near)
-                st.dataframe(
-                    df_near.style.format({
-                        'Ufficiale': '€ {:.2f}',
-                        'Gestionale': '€ {:.2f}',
-                        'Differenza': '€ {:.2f}'
-                    }),
-                    use_container_width=True,
-                    hide_index=True
-                )
-            
-            if date_mismatches:
-                st.info("ℹ️ Suggerimento: Stesso importo trovato su date diverse")
-                df_mismatches = pd.DataFrame(date_mismatches)
-                st.dataframe(
-                    df_mismatches.style.format({'Importo': '€ {:.2f}'}).applymap(lambda x: 'font-weight: bold', subset=['Importo']),
-                    use_container_width=True,
-                    hide_index=True
-                )
 
-            if not results.empty:
-                st.subheader(f"📊 Discrepanze Trovate ({len(results)} righe)")
-                results = results.sort_values(['Data', 'Fonte'])
-
-                def style_results(styler):
-                    styler.applymap(lambda x: f"color: {'#ef4444' if x < 0 else '#22c55e'}; font-weight: bold", subset=['Importo'])
-                    styler.applymap(lambda x: f"background-color: {'#2563eb' if 'Ufficiale' in x else '#f97316'}; color: white; font-weight: bold; border-radius: 4px; padding: 2px 6px; display: inline-block", subset=['Fonte'])
-                    styler.format({'Importo': '€ {:.2f}'})
-                    return styler
-
-                st.dataframe(style_results(results.style), use_container_width=True, hide_index=True)
-                
-                output = io.BytesIO()
-                with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                    results.to_excel(writer, index=False)
-                st.download_button("📥 Scarica Report Excel", output.getvalue(), "discrepanze_riconciliazione.xlsx")
-            else:
-                st.success("✅ Riconciliazione perfetta! Tutti i movimenti coincidono.")
+            st.session_state.off_df = off_df
+            st.session_state.tar_df = tar_df
+            st.session_state.results = results
+            st.session_state.near = near
+            st.session_state.date_mismatches = date_mismatches
     else:
         st.error("Carica entrambi i file per procedere.")
 
+off_df = st.session_state.off_df
+tar_df = st.session_state.tar_df
+results = st.session_state.results
+near = st.session_state.near
+date_mismatches = st.session_state.date_mismatches
+
+# -----------------------------
+# RISULTATI RICONCILIAZIONE
+# -----------------------------
+if not off_df.empty and not tar_df.empty:
+    if near:
+        st.warning("⚠️ Differenze minime rilevate (stessa data, importo quasi uguale)")
+        df_near = pd.DataFrame(near)
+        st.dataframe(
+            df_near.style.format({
+                'Ufficiale': '€ {:.2f}',
+                'Gestionale': '€ {:.2f}',
+                'Differenza': '€ {:.2f}'
+            }),
+            use_container_width=True,
+            hide_index=True
+        )
+
+    if date_mismatches:
+        st.info("ℹ️ Suggerimento: Stesso importo trovato su date diverse")
+        df_mismatches = pd.DataFrame(date_mismatches)
+        st.dataframe(
+            df_mismatches.style.format({'Importo': '€ {:.2f}'}).applymap(
+                lambda x: 'font-weight: bold',
+                subset=['Importo']
+            ),
+            use_container_width=True,
+            hide_index=True
+        )
+
+    if not results.empty:
+        st.subheader(f"📊 Discrepanze Trovate ({len(results)} righe)")
+        results_view = results.sort_values(['Data', 'Fonte']).copy()
+
+        def style_results(styler):
+            styler.applymap(
+                lambda x: f"color: {'#ef4444' if x < 0 else '#22c55e'}; font-weight: bold",
+                subset=['Importo']
+            )
+            styler.applymap(
+                lambda x: (
+                    "background-color: #2563eb; color: white; font-weight: bold; "
+                    "border-radius: 4px; padding: 2px 6px; display: inline-block"
+                    if 'Ufficiale' in x else
+                    "background-color: #f97316; color: white; font-weight: bold; "
+                    "border-radius: 4px; padding: 2px 6px; display: inline-block"
+                ),
+                subset=['Fonte']
+            )
+            styler.format({'Importo': '€ {:.2f}'})
+            return styler
+
+        st.dataframe(
+            style_results(results_view.style),
+            use_container_width=True,
+            hide_index=True
+        )
+
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            results_view.to_excel(writer, index=False)
+
+        st.download_button(
+            "📥 Scarica Report Excel",
+            output.getvalue(),
+            "discrepanze_riconciliazione.xlsx"
+        )
+    else:
+        st.success("✅ Riconciliazione perfetta! Tutti i movimenti coincidono.")
+
+# -----------------------------
+# TESORERIA
+# -----------------------------
 st.divider()
 st.header("💰 Sezione Tesoreria (Dati Ufficiali)")
 
-if 'off_df' in locals() and not off_df.empty:
-
+if not off_df.empty:
     off_period = off_df[
         (off_df['date'] >= pd.Timestamp(start)) &
         (off_df['date'] <= pd.Timestamp(end))
@@ -238,7 +296,6 @@ if 'off_df' in locals() and not off_df.empty:
             7: "Lug", 8: "Ago", 9: "Set", 10: "Ott", 11: "Nov", 12: "Dic"
         }
 
-        # Aggregazione mensile corretta
         off_period['AnnoMese'] = off_period['date'].dt.to_period('M')
 
         monthly = off_period.groupby('AnnoMese').agg(
@@ -246,22 +303,20 @@ if 'off_df' in locals() and not off_df.empty:
             Uscite=('amount', lambda x: abs(x[x < 0].sum()))
         ).reset_index()
 
-        # Data reale per ordinamento corretto sull'asse X
         monthly['MeseData'] = monthly['AnnoMese'].dt.to_timestamp()
+        monthly = monthly.sort_values('MeseData').reset_index(drop=True)
 
-        # Label italiana leggibile
         monthly['MeseLabel'] = monthly['MeseData'].apply(
             lambda d: f"{mesi_it[d.month]} {str(d.year)[-2:]}"
         )
 
-        # Selettore visualizzazione
         vista = st.radio(
             "Visualizza",
             ["Entrate + Uscite", "Solo Entrate", "Solo Uscite"],
-            horizontal=True
+            horizontal=True,
+            key="tesoreria_vista"
         )
 
-        colonne_da_mostrare = []
         if vista == "Entrate + Uscite":
             colonne_da_mostrare = ['Entrate', 'Uscite']
         elif vista == "Solo Entrate":
@@ -269,8 +324,10 @@ if 'off_df' in locals() and not off_df.empty:
         else:
             colonne_da_mostrare = ['Uscite']
 
-        chart_data = monthly[['MeseData', 'MeseLabel'] + colonne_da_mostrare].melt(
-            id_vars=['MeseData', 'MeseLabel'],
+        sort_order = monthly['MeseLabel'].tolist()
+
+        chart_data = monthly[['MeseLabel'] + colonne_da_mostrare].melt(
+            id_vars=['MeseLabel'],
             value_vars=colonne_da_mostrare,
             var_name='Tipo',
             value_name='Importo'
@@ -286,12 +343,10 @@ if 'off_df' in locals() and not off_df.empty:
             .mark_bar(size=28)
             .encode(
                 x=alt.X(
-                    'yearmonth(MeseData):T',
+                    'MeseLabel:N',
                     title='',
-                    axis=alt.Axis(
-                        format='%b %y',
-                        labelAngle=0
-                    )
+                    sort=sort_order,
+                    axis=alt.Axis(labelAngle=0)
                 ),
                 xOffset='Tipo:N',
                 y=alt.Y('Importo:Q', title='Importo (€)'),
@@ -312,6 +367,6 @@ if 'off_df' in locals() and not off_df.empty:
         st.altair_chart(chart, use_container_width=True)
 
     else:
-        st.info("Nessun dato ufficiale disponibile nel periodo per la tesoreria.")
+        st.info("Nessun dato ufficiale disponibile nel periodo selezionato per la tesoreria.")
 else:
     st.info("Esegui prima l'analisi per vedere la tesoreria.")
