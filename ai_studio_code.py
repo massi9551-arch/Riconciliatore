@@ -231,15 +231,14 @@ if 'off_df' in locals() and not off_df.empty:
 
         st.subheader("📈 Andamento Entrate vs Uscite")
 
-        # Import locale per non toccare la parte alta del file
         import altair as alt
 
-        # Aggregazione mensile
         mesi_it = {
             1: "Gen", 2: "Feb", 3: "Mar", 4: "Apr", 5: "Mag", 6: "Giu",
             7: "Lug", 8: "Ago", 9: "Set", 10: "Ott", 11: "Nov", 12: "Dic"
         }
 
+        # Aggregazione mensile corretta
         off_period['AnnoMese'] = off_period['date'].dt.to_period('M')
 
         monthly = off_period.groupby('AnnoMese').agg(
@@ -247,16 +246,32 @@ if 'off_df' in locals() and not off_df.empty:
             Uscite=('amount', lambda x: abs(x[x < 0].sum()))
         ).reset_index()
 
-        monthly['AnnoMese_dt'] = monthly['AnnoMese'].dt.to_timestamp()
-        monthly = monthly.sort_values('AnnoMese_dt')
+        # Data reale per ordinamento corretto sull'asse X
+        monthly['MeseData'] = monthly['AnnoMese'].dt.to_timestamp()
 
-        monthly['Mese'] = monthly['AnnoMese_dt'].apply(
+        # Label italiana leggibile
+        monthly['MeseLabel'] = monthly['MeseData'].apply(
             lambda d: f"{mesi_it[d.month]} {str(d.year)[-2:]}"
         )
 
-        chart_data = monthly[['Mese', 'Entrate', 'Uscite']].melt(
-            id_vars='Mese',
-            value_vars=['Entrate', 'Uscite'],
+        # Selettore visualizzazione
+        vista = st.radio(
+            "Visualizza",
+            ["Entrate + Uscite", "Solo Entrate", "Solo Uscite"],
+            horizontal=True
+        )
+
+        colonne_da_mostrare = []
+        if vista == "Entrate + Uscite":
+            colonne_da_mostrare = ['Entrate', 'Uscite']
+        elif vista == "Solo Entrate":
+            colonne_da_mostrare = ['Entrate']
+        else:
+            colonne_da_mostrare = ['Uscite']
+
+        chart_data = monthly[['MeseData', 'MeseLabel'] + colonne_da_mostrare].melt(
+            id_vars=['MeseData', 'MeseLabel'],
+            value_vars=colonne_da_mostrare,
             var_name='Tipo',
             value_name='Importo'
         )
@@ -268,14 +283,25 @@ if 'off_df' in locals() and not off_df.empty:
 
         chart = (
             alt.Chart(chart_data)
-            .mark_bar(size=24)
+            .mark_bar(size=28)
             .encode(
-                x=alt.X('Mese:N', title='', axis=alt.Axis(labelAngle=0)),
+                x=alt.X(
+                    'yearmonth(MeseData):T',
+                    title='',
+                    axis=alt.Axis(
+                        format='%b %y',
+                        labelAngle=0
+                    )
+                ),
                 xOffset='Tipo:N',
                 y=alt.Y('Importo:Q', title='Importo (€)'),
-                color=alt.Color('Tipo:N', scale=color_scale, legend=alt.Legend(title='')),
+                color=alt.Color(
+                    'Tipo:N',
+                    scale=color_scale,
+                    legend=alt.Legend(title='')
+                ),
                 tooltip=[
-                    alt.Tooltip('Mese:N', title='Mese'),
+                    alt.Tooltip('MeseLabel:N', title='Mese'),
                     alt.Tooltip('Tipo:N', title='Tipo'),
                     alt.Tooltip('Importo:Q', title='Importo', format=',.2f')
                 ]
