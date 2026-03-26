@@ -175,18 +175,40 @@ if 'near' not in st.session_state:
 if 'date_mismatches' not in st.session_state:
     st.session_state.date_mismatches = []
 
+# Stato persistente
+if 'analysis_ready' not in st.session_state:
+    st.session_state.analysis_ready = False
+
+if 'off_df' not in st.session_state:
+    st.session_state.off_df = pd.DataFrame()
+
+if 'tar_df' not in st.session_state:
+    st.session_state.tar_df = pd.DataFrame()
+
+if 'results' not in st.session_state:
+    st.session_state.results = pd.DataFrame()
+
+if 'near' not in st.session_state:
+    st.session_state.near = []
+
+if 'date_mismatches' not in st.session_state:
+    st.session_state.date_mismatches = []
+
 if st.button("🚀 Avvia Analisi", use_container_width=True):
     if off_file and tar_file:
         with st.spinner('Analisi in corso...'):
-            off_df = process_file(off_file)
-            tar_df = process_file(tar_file)
-            results, near, date_mismatches = run_reconciliation(off_df, tar_df, start, end)
+            off_df_calc = process_file(off_file)
+            tar_df_calc = process_file(tar_file)
+            results_calc, near_calc, date_mismatches_calc = run_reconciliation(
+                off_df_calc, tar_df_calc, start, end
+            )
 
-            st.session_state.off_df = off_df
-            st.session_state.tar_df = tar_df
-            st.session_state.results = results
-            st.session_state.near = near
-            st.session_state.date_mismatches = date_mismatches
+            st.session_state.off_df = off_df_calc.copy()
+            st.session_state.tar_df = tar_df_calc.copy()
+            st.session_state.results = results_calc.copy()
+            st.session_state.near = near_calc.copy()
+            st.session_state.date_mismatches = date_mismatches_calc.copy()
+            st.session_state.analysis_ready = True
     else:
         st.error("Carica entrambi i file per procedere.")
 
@@ -199,7 +221,7 @@ date_mismatches = st.session_state.date_mismatches
 # -----------------------------
 # RISULTATI RICONCILIAZIONE
 # -----------------------------
-if not off_df.empty and not tar_df.empty:
+if st.session_state.analysis_ready:
     if near:
         st.warning("⚠️ Differenze minime rilevate (stessa data, importo quasi uguale)")
         df_near = pd.DataFrame(near)
@@ -271,7 +293,7 @@ if not off_df.empty and not tar_df.empty:
 st.divider()
 st.header("💰 Sezione Tesoreria (Dati Ufficiali)")
 
-if not off_df.empty:
+if st.session_state.analysis_ready and not off_df.empty:
     off_period = off_df[
         (off_df['date'] >= pd.Timestamp(start)) &
         (off_df['date'] <= pd.Timestamp(end))
