@@ -213,33 +213,78 @@ st.divider()
 st.header("💰 Sezione Tesoreria (Dati Ufficiali)")
 
 if 'off_df' in locals() and not off_df.empty:
-    
+
     off_period = off_df[
-        (off_df['date'] >= pd.Timestamp(start)) & 
+        (off_df['date'] >= pd.Timestamp(start)) &
         (off_df['date'] <= pd.Timestamp(end))
     ].copy()
-    
+
     if not off_period.empty:
-        entrate_tot = off_period[off_period['amount'] > 0]['amount'].sum()
-        uscite_tot = abs(off_period[off_period['amount'] < 0]['amount'].sum())
+        entrate_tot = off_period.loc[off_period['amount'] > 0, 'amount'].sum()
+        uscite_tot = abs(off_period.loc[off_period['amount'] < 0, 'amount'].sum())
         saldo_netto = entrate_tot - uscite_tot
-        
+
         m1, m2, m3 = st.columns(3)
         m1.metric("Entrate Totali", f"€ {entrate_tot:,.2f}")
         m2.metric("Uscite Totali", f"€ {uscite_tot:,.2f}")
-        m3.metric("Saldo Netto", f"€ {saldo_netto:,.2f}", delta=round(saldo_netto, 2))
-        
+        m3.metric("Saldo Netto", f"€ {saldo_netto:,.2f}", delta=f"€ {saldo_netto:,.2f}")
+
         st.subheader("📈 Andamento Entrate vs Uscite")
-        
-        off_period['Giorno'] = off_period['date'].dt.date
-        
-        chart_data = off_period.groupby('Giorno').agg(
+
+        # Import locale per non toccare la parte alta del file
+        import altair as alt
+
+        # Aggregazione mensile
+        mesi_it = {
+            1: "Gen", 2: "Feb", 3: "Mar", 4: "Apr", 5: "Mag", 6: "Giu",
+            7: "Lug", 8: "Ago", 9: "Set", 10: "Ott", 11: "Nov", 12: "Dic"
+        }
+
+        off_period['AnnoMese'] = off_period['date'].dt.to_period('M')
+
+        monthly = off_period.groupby('AnnoMese').agg(
             Entrate=('amount', lambda x: x[x > 0].sum()),
             Uscite=('amount', lambda x: abs(x[x < 0].sum()))
-        ).fillna(0)
-        
-        st.bar_chart(chart_data)
-        
+        ).reset_index()
+
+        monthly['AnnoMese_dt'] = monthly['AnnoMese'].dt.to_timestamp()
+        monthly = monthly.sort_values('AnnoMese_dt')
+
+        monthly['Mese'] = monthly['AnnoMese_dt'].apply(
+            lambda d: f"{mesi_it[d.month]} {str(d.year)[-2:]}"
+        )
+
+        chart_data = monthly[['Mese', 'Entrate', 'Uscite']].melt(
+            id_vars='Mese',
+            value_vars=['Entrate', 'Uscite'],
+            var_name='Tipo',
+            value_name='Importo'
+        )
+
+        color_scale = alt.Scale(
+            domain=['Entrate', 'Uscite'],
+            range=['#22c55e', '#ef4444']
+        )
+
+        chart = (
+            alt.Chart(chart_data)
+            .mark_bar(size=24)
+            .encode(
+                x=alt.X('Mese:N', title='', axis=alt.Axis(labelAngle=0)),
+                xOffset='Tipo:N',
+                y=alt.Y('Importo:Q', title='Importo (€)'),
+                color=alt.Color('Tipo:N', scale=color_scale, legend=alt.Legend(title='')),
+                tooltip=[
+                    alt.Tooltip('Mese:N', title='Mese'),
+                    alt.Tooltip('Tipo:N', title='Tipo'),
+                    alt.Tooltip('Importo:Q', title='Importo', format=',.2f')
+                ]
+            )
+            .properties(height=420)
+        )
+
+        st.altair_chart(chart, use_container_width=True)
+
     else:
         st.info("Nessun dato ufficiale disponibile nel periodo per la tesoreria.")
 else:
