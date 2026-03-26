@@ -208,3 +208,37 @@ if st.button("🚀 Avvia Analisi", use_container_width=True):
                 st.success("✅ Riconciliazione perfetta! Tutti i movimenti coincidono.")
     else:
         st.error("Carica entrambi i file per procedere.")
+
+# --- PARTE 2: NUOVA SEZIONE TESORERIA (Aggiunta qui) ---
+            st.divider()
+            st.header("💰 Sezione Tesoreria (Dati Ufficiali)")
+            
+            # Filtriamo i dati ufficiali per il periodo selezionato
+            off_period = off_df_raw[(off_df_raw['date'] >= pd.Timestamp(start)) & (off_df_raw['date'] <= pd.Timestamp(end))]
+            
+            if not off_period.empty:
+                entrate_tot = off_period[off_period['amount'] > 0]['amount'].sum()
+                uscite_tot = abs(off_period[off_period['amount'] < 0]['amount'].sum())
+                saldo_netto = entrate_tot - uscite_tot
+
+                # Metriche visive
+                m1, m2, m3 = st.columns(3)
+                m1.metric("Entrate Totali", f"€ {entrate_tot:,.2f}")
+                m2.metric("Uscite Totali", f"€ {uscite_tot:,.2f}", delta_color="inverse")
+                m3.metric("Saldo Netto", f"€ {saldo_netto:,.2f}", delta=round(saldo_netto, 2))
+
+                # Grafico Andamento
+                st.subheader("📈 Andamento Entrate vs Uscite")
+                # Prepariamo i dati raggruppati per giorno (o mese se il periodo è lungo)
+                off_period['Giorno'] = off_period['date'].dt.date
+                chart_data = off_period.groupby('Giorno').apply(lambda x: pd.Series({
+                    'Entrate': x[x['amount'] > 0]['amount'].sum(),
+                    'Uscite': abs(x[x['amount'] < 0]['amount'].sum())
+                })).fillna(0)
+                
+                # Visualizzazione grafico a barre
+                st.bar_chart(chart_data, color=["#22c55e", "#ef4444"])
+            else:
+                st.info("Nessun dato ufficiale disponibile nel periodo per la tesoreria.")
+    else:
+        st.error("Carica entrambi i file per procedere.")
