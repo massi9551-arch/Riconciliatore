@@ -149,7 +149,6 @@ def run_reconciliation(off_df, tar_df, start, end):
     return pd.DataFrame(discrepancies), near_matches, date_mismatches
 
 st.title("🔄 Riconciliatore Bancario")
-st.markdown("Analisi avanzata con gestione automatica dei segni")
 
 c1, c2 = st.columns(2)
 with c1: off_file = st.file_uploader("Estratto Conto (Ufficiale)", type=['xlsx'])
