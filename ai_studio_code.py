@@ -76,7 +76,7 @@ def process_file(file):
     rows = []
     for _, row in df.iterrows():
         try:
-            d = pd.to_datetime(row[date_col], errors='coerce')
+            d = pd.to_datetime(row[date_col], errors='coerce', dayfirst=True, format='mixed')
             if pd.isna(d): continue
             amt = get_row_amount(row, desc_col, date_col)
             if amt == 0: continue
