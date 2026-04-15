@@ -269,7 +269,7 @@ if st.session_state.analysis_ready:
             return styler
 
         st.dataframe(
-            style_results(results_view.style),
+            results_view,
             use_container_width=True,
             hide_index=True
         )
